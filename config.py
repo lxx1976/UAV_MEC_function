@@ -158,7 +158,7 @@ def get_config():
     )
 
     # prepare parameters
-    parser.add_argument("--algorithm_name", type=str, default="mappo", choices=["rmappo", "mappo"])
+    parser.add_argument("--algorithm_name", type=str, default="rmappo", choices=["rmappo", "mappo"])
 
     parser.add_argument(
         "--experiment_name",
@@ -188,7 +188,7 @@ def get_config():
     parser.add_argument(
         "--n_rollout_threads",
         type=int,
-        default=5,
+        default=1,
         help="Number of parallel envs for training rollouts",
     )
     parser.add_argument(
@@ -206,8 +206,8 @@ def get_config():
     parser.add_argument(
         "--num_env_steps",
         type=int,
-        default=10e6,
-        help="Number of environment steps to train (default: 10e6)",
+        default=10e5,
+        help="Number of environment steps to train (default: 5e5, increased for longer episodes)",
     )
     parser.add_argument(
         "--user_name",
@@ -217,7 +217,7 @@ def get_config():
     )
 
     # env parameters
-    parser.add_argument("--env_name", type=str, default="UAVMECEnv", help="specify the name of environment")
+    parser.add_argument("--env_name", type=str, default="MyEnv", help="specify the name of environment")
     parser.add_argument(
         "--use_obs_instead_of_state",
         action="store_true",
@@ -231,8 +231,8 @@ def get_config():
     # network parameters
     parser.add_argument(
         "--share_policy",
-        action="store_false",
-        default=False,
+        action="store_true",
+        default=True,
         help="Whether agent share the same policy",
     )
     parser.add_argument(
@@ -256,7 +256,7 @@ def get_config():
     parser.add_argument(
         "--hidden_size",
         type=int,
-        default=64,
+        default=128,
         help="Dimension of hidden layers for actor/critic networks",
     )
     parser.add_argument(
@@ -301,8 +301,8 @@ def get_config():
     )
     parser.add_argument(
         "--use_recurrent_policy",
-        action="store_false",
-        default=False,
+        action="store_true",
+        default=True,
         help="use a recurrent policy",
     )
     parser.add_argument("--recurrent_N", type=int, default=1, help="The number of recurrent layers.")
@@ -346,8 +346,8 @@ def get_config():
     parser.add_argument(
         "--num_mini_batch",
         type=int,
-        default=1,
-        help="number of batches for ppo (default: 1)",
+        default=5,
+        help="number of batches for ppo (default: 5)",
     )
     parser.add_argument(
         "--entropy_coef",
@@ -492,98 +492,6 @@ def get_config():
         type=str,
         default=None,
         help="by default None. set the path to pretrained model.",
-    )
-
-    # UAV MEC environment parameters
-    parser.add_argument(
-        "--uav_num_uavs",
-        type=int,
-        default=2,
-        help="Number of UAVs (default: 2)",
-    )
-    parser.add_argument(
-        "--uav_num_terminals",
-        type=int,
-        default=6,
-        help="Number of ground terminals (default: 6)",
-    )
-    parser.add_argument(
-        "--uav_ground_area",
-        type=float,
-        default=400.0,
-        help="Ground area size in meters (default: 400.0)",
-    )
-    parser.add_argument(
-        "--uav_height_min",
-        type=float,
-        default=20.0,
-        help="Minimum UAV flight height in meters (default: 20.0)",
-    )
-    parser.add_argument(
-        "--uav_height_max",
-        type=float,
-        default=120.0,
-        help="Maximum UAV flight height in meters (default: 120.0)",
-    )
-    parser.add_argument(
-        "--uav_communication_range",
-        type=float,
-        default=100.0,
-        help="UAV communication range in meters (default: 100.0)",
-    )
-    parser.add_argument(
-        "--uav_cpu_freq_uav",
-        type=float,
-        default=5e9,
-        help="UAV CPU frequency in cycles/s (default: 5e9)",
-    )
-    parser.add_argument(
-        "--uav_cpu_freq_ground",
-        type=float,
-        default=1e9,
-        help="Ground server CPU frequency in cycles/s (default: 1e9)",
-    )
-    parser.add_argument(
-        "--uav_max_horizontal_speed",
-        type=float,
-        default=10.0,
-        help="Maximum UAV horizontal speed in m/s (default: 10.0)",
-    )
-    parser.add_argument(
-        "--uav_max_vertical_speed",
-        type=float,
-        default=10.0,
-        help="Maximum UAV vertical speed in m/s (default: 10.0)",
-    )
-    parser.add_argument(
-        "--uav_battery_capacity",
-        type=float,
-        default=324000.0,
-        help="UAV battery capacity in Joules (default: 324000.0, ~90Wh)",
-    )
-    parser.add_argument(
-        "--uav_time_slot",
-        type=float,
-        default=1.0,
-        help="Time slot duration in seconds (default: 1.0)",
-    )
-    parser.add_argument(
-        "--uav_data_range_min",
-        type=float,
-        default=102400.0,
-        help="Minimum task data size in bits (default: 102400.0, 100KB)",
-    )
-    parser.add_argument(
-        "--uav_data_range_max",
-        type=float,
-        default=204800.0,
-        help="Maximum task data size in bits (default: 204800.0, 200KB)",
-    )
-    parser.add_argument(
-        "--uav_cpu_cycles_per_bit",
-        type=float,
-        default=1000.0,
-        help="CPU cycles required per bit (default: 1000.0)",
     )
 
     return parser

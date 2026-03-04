@@ -121,6 +121,82 @@ def generate_uav_initial_positions(
     return positions
 
 
+def get_fixed_terminal_positions(
+    num_terminals: int,
+    ground_area: float
+) -> List[List[float]]:
+    """
+    [1.1.2.5] 获取固定的终端基准位置
+
+    功能：返回预定义的固定终端位置，用于训练的一致性
+
+    参数：
+        num_terminals: 终端数量
+        ground_area: 地面区域边长 (m)
+
+    返回：
+        base_positions: 固定位置列表，每个元素为 [x, y, z]
+
+    示例：
+        >>> positions = get_fixed_terminal_positions(6, 400.0)
+        >>> len(positions)  # 6
+    """
+    # 根据终端数量返回不同的固定位置配置
+    if num_terminals == 6:
+        # 6个终端：均匀分布在场景中（2×3网格）
+        quarter = ground_area / 4
+        three_quarter = ground_area * 3 / 4
+        half = ground_area / 2
+        
+        return [
+            [quarter, quarter, 1.0],        # 终端0：左下
+            [three_quarter, quarter, 1.0],  # 终端1：右下
+            [quarter, three_quarter, 1.0],  # 终端2：左上
+            [three_quarter, three_quarter, 1.0],  # 终端3：右上
+            [half, quarter, 1.0],           # 终端4：中下
+            [half, three_quarter, 1.0],     # 终端5：中上
+        ]
+    elif num_terminals == 4:
+        # 4个终端：四角分布
+        quarter = ground_area / 4
+        three_quarter = ground_area * 3 / 4
+        
+        return [
+            [quarter, quarter, 1.0],
+            [three_quarter, quarter, 1.0],
+            [quarter, three_quarter, 1.0],
+            [three_quarter, three_quarter, 1.0],
+        ]
+    elif num_terminals == 8:
+        # 8个终端：3×3网格（去掉中心）
+        third = ground_area / 3
+        two_third = ground_area * 2 / 3
+        
+        return [
+            [third, third, 1.0],
+            [two_third, third, 1.0],
+            [ground_area, third, 1.0],
+            [third, two_third, 1.0],
+            [two_third, two_third, 1.0],
+            [ground_area, two_third, 1.0],
+            [third, ground_area, 1.0],
+            [two_third, ground_area, 1.0],
+        ]
+    else:
+        # 其他数量：均匀圆形分布
+        center = ground_area / 2
+        radius = ground_area / 3
+        positions = []
+        
+        for i in range(num_terminals):
+            angle = 2 * np.pi * i / num_terminals
+            x = center + radius * np.cos(angle)
+            y = center + radius * np.sin(angle)
+            positions.append([x, y, 1.0])
+        
+        return positions
+
+
 def generate_terminal_positions(
     num_terminals: int,
     ground_area: float,
@@ -581,7 +657,7 @@ def calculate_computation_energy(
 def calculate_communication_energy(
     transmit_power: float,
     time_slot: float,
-    efficiency: float = 0.1
+    efficiency: float = 1.0
 ) -> float:
     """
     [2.2.4] 计算通信能耗
@@ -591,14 +667,14 @@ def calculate_communication_energy(
     参数：
         transmit_power: 发射功率 (W)
         time_slot: 时隙长度 (s)
-        efficiency: 效率系数，默认0.1（发射功率的10%）
+        efficiency: 效率系数，默认1.0
 
     返回：
         energy: 通信能耗 (J)
 
     示例：
         >>> energy = calculate_communication_energy(0.1, 1.0, 0.1)
-        >>> energy  # 0.01 J
+        >>> energy  # 0.2 J
     """
     return transmit_power * time_slot * efficiency
 
@@ -920,6 +996,10 @@ def calculate_uplink_rate(
     carrier_frequency: float = 2.4e9,
     noise_power_density: float = 4e-21,
     antenna_gain: float = 2.0,
+    a: float = 9.61,
+    b: float = 0.16,
+    eta_los: float = 1.0,
+    eta_nlos: float = 20.0,
     mode: str = 'expected'
 ) -> float:
     """
@@ -935,6 +1015,8 @@ def calculate_uplink_rate(
         carrier_frequency: 载波频率 (Hz)
         noise_power_density: 噪声功率谱密度 (W/Hz)
         antenna_gain: 天线增益 (dBi)
+        a, b: LoS概率拟合参数
+        eta_los, eta_nlos: LoS/NLoS附加损耗 (dB)
         mode: 'expected' 或 'sample'
 
     返回：
@@ -949,6 +1031,10 @@ def calculate_uplink_rate(
     path_loss = calculate_total_path_loss(
         uav_pos, terminal_pos,
         carrier_frequency=carrier_frequency,
+        a=a,
+        b=b,
+        eta_los=eta_los,
+        eta_nlos=eta_nlos,
         mode=mode
     )
 
@@ -1677,6 +1763,61 @@ def initialize_all_terminal_tasks(
         tasks.append(task)
     return tasks
 
+    
+def decode_action_vector_distance_based(
+    action_vector: np.ndarray,
+    num_terminals: int,
+    movement_bins: int = 7,
+    max_serve_terminals: int = 3
+) -> Tuple[int, int, int, bool, int]:
+    """
+    Decode a 3D continuous action vector into:
+    (movement_action, horizontal_action, vertical_action, service_decision, num_terminals_to_serve).
+    
+    参数:
+        action_vector: [3,] 连续动作向量
+            - action_vector[0]: 移动动作 (连续值 → 离散索引 0-6)
+            - action_vector[1]: 服务决策 (连续值 → 二进制 0/1)
+            - action_vector[2]: 服务终端数量 (连续值 → 离散索引 0-3)
+        num_terminals: 终端总数量
+        movement_bins: 移动动作数量，默认7
+        max_serve_terminals: 最大服务终端数量，默认3
+    
+    返回:
+        movement_action: 移动动作索引 (0-6)
+        horizontal_action: 水平动作 (0-4)
+        vertical_action: 垂直动作 (0-2)
+        service_decision: 是否提供服务 (True/False)
+        num_terminals_to_serve: 服务终端数量 (0-num_terminals)
+    
+    示例:
+        >>> action = [0.3, 0.5, -0.2]
+        >>> movement, h, v, service, num = decode_action_vector_distance_based(action, 6)
+        >>> movement  # 4
+        >>> service  # True
+        >>> num  # 1 (服务最近的1个终端)
+    """
+    if len(action_vector) < 3:
+        raise ValueError("action_vector must contain at least 3 elements.")
+    
+    # 解码移动动作
+    movement_action = continuous_to_discrete_index(action_vector[0], movement_bins)
+    horizontal_action, vertical_action = parse_movement_action(movement_action)
+    
+    # 解码服务决策（连续值 > 0 → 服务）
+    service_decision = bool(action_vector[1] > 0.0)
+    
+    # 解码服务终端数量（0 到 max_serve_terminals）
+    num_terminals_to_serve = continuous_to_discrete_index(
+        action_vector[2], 
+        max_serve_terminals + 1,  # 0-3，共4个选项
+        value_min=-1.0,
+        value_max=1.0
+    )
+    
+    return movement_action, horizontal_action, vertical_action, service_decision, num_terminals_to_serve
+
+
 
 def update_terminal_progress(
     terminal: Dict[str, Any],
@@ -1719,35 +1860,53 @@ def update_terminal_progress(
 
 def update_all_terminals_progress(
     terminals: List[Dict[str, Any]],
-    uav_terminal_progress: Dict[int, Dict[int, float]]
+    uav_terminal_progress: Dict[int, Dict[int, float]],
+    cpu_freq_terminal: float = 0.0,
+    cpu_cycles_per_bit: int = 1000,
+    time_slot: float = 1.0
 ) -> Tuple[List[Dict[str, Any]], List[int]]:
     """
     [6.2.2] 更新所有终端任务进度
 
-    功能：批量更新所有终端的任务进度
+    功能：批量更新所有终端的任务进度，包括终端本地计算和UAV卸载处理
 
     参数：
         terminals: 终端列表
         uav_terminal_progress: UAV-终端处理量字典 {uav_id: {terminal_id: processed_bits}}
-
+        cpu_freq_terminal: 终端本地CPU频率 (Hz)，默认0表示不进行本地计算
+        cpu_cycles_per_bit: 每bit需要的CPU周期数
+        time_slot: 时隙长度 (s)
     返回：
         updated_terminals: 更新后的终端列表
         completed_terminal_ids: 本步完成的终端ID列表
 
     示例：
         >>> progress = {0: {0: 500.0, 1: 300.0}, 1: {1: 200.0}}
-        >>> updated, completed = update_all_terminals_progress(terminals, progress)
+        >>> updated, completed = update_all_terminals_progress(terminals, progress, 2e9, 1000, 1.0)
     """
     updated_terminals = []
     completed_terminal_ids = []
+    # 计算终端本地每步的处理能力 (bits)
+    local_processing_capacity = 0.0
+    if cpu_freq_terminal > 0:
+        local_processing_capacity = (cpu_freq_terminal * time_slot) / cpu_cycles_per_bit
 
     for term_id, terminal in enumerate(terminals):
-        # 汇总所有UAV对该终端的处理量
-        total_processed = 0.0
+        # 1. 计算终端本地处理量（如果终端未完成）
+        local_processed = 0.0
+        if not terminal.get('is_completed', False) and local_processing_capacity > 0:
+            # 本地处理量不能超过剩余数据量
+            local_processed = min(local_processing_capacity, terminal['remaining_data_bits'])
+        
+        # 2. 汇总所有UAV对该终端的处理量
+        uav_processed = 0.0
         for uav_id, term_progress in uav_terminal_progress.items():
-            total_processed += term_progress.get(term_id, 0.0)
+            uav_processed += term_progress.get(term_id, 0.0)
+        
+        # 3. 总处理量 = 本地处理 + UAV处理
+        total_processed = local_processed + uav_processed
 
-        # 更新终端进度
+        # 4. 更新终端进度
         updated_terminal, is_completed = update_terminal_progress(terminal, total_processed)
         updated_terminals.append(updated_terminal)
 
@@ -2321,6 +2480,56 @@ def clip_action(action: int, action_dim: int) -> int:
         >>> clip_action(-5, 16)  # 0
     """
     return int(np.clip(action, 0, action_dim - 1))
+
+
+def continuous_to_discrete_index(
+    value: float,
+    num_bins: int,
+    value_min: float = -1.0,
+    value_max: float = 1.0
+) -> int:
+    """Map a continuous scalar to a discrete index in [0, num_bins-1]."""
+    if num_bins <= 1:
+        return 0
+
+    clipped = float(np.clip(value, value_min, value_max))
+    ratio = (clipped - value_min) / max(value_max - value_min, 1e-12)
+    idx = int(np.floor(ratio * num_bins))
+    return int(np.clip(idx, 0, num_bins - 1))
+
+
+def decode_action_vector(
+    action_vector: np.ndarray,
+    num_terminals: int,
+    movement_bins: int = 7
+) -> Tuple[int, int, int, int, int]:
+    """
+    Decode a 3D continuous action vector into:
+    (movement_action, horizontal_action, vertical_action, service_decision, terminal_id).
+    
+    参数:
+        action_vector: 3维连续动作向量 [-1, 1]
+            - action[0]: 移动动作 (映射到 0-6)
+            - action[1]: 是否服务 (映射到 0/1)
+            - action[2]: 终端选择 (映射到 0 到 num_terminals-1)
+        num_terminals: 终端数量
+        movement_bins: 移动动作的离散化数量，默认7
+    
+    返回:
+        movement_action: 移动动作索引 (0-6)
+        horizontal_action: 水平动作 (0-4)
+        vertical_action: 垂直动作 (0-2)
+        service_decision: 是否服务 (0/1)
+        terminal_id: 终端ID (0 到 num_terminals-1)
+    """
+    if len(action_vector) < 3:
+        raise ValueError("action_vector must contain at least 3 elements.")
+
+    movement_action = continuous_to_discrete_index(action_vector[0], movement_bins)
+    service_decision = continuous_to_discrete_index(action_vector[1], 2)  # 0 or 1
+    terminal_id = continuous_to_discrete_index(action_vector[2], max(num_terminals, 1))
+    horizontal_action, vertical_action = parse_movement_action(movement_action)
+    return movement_action, horizontal_action, vertical_action, service_decision, terminal_id
 
 
 # ============================================================================

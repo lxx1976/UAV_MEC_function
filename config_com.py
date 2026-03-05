@@ -158,20 +158,26 @@ def get_config():
     )
 
     # prepare parameters
-    parser.add_argument("--algorithm_name", type=str, default="rmappo", choices=["rmappo", "mappo"])
+    parser.add_argument("--algorithm_name", type=str, default="mappo", choices=["rmappo", "mappo"])
 
     parser.add_argument(
         "--experiment_name",
         type=str,
-        default="check",
+        default="scheme_c_v3",
         help="an identifier to distinguish different experiment.",
     )
     parser.add_argument("--seed", type=int, default=1, help="Random seed for numpy/torch")
     parser.add_argument(
         "--cuda",
-        action="store_false",
+        action="store_true",
+        default=True,
+        help="use GPU to train; by default will use GPU unless --no_cuda is specified;",
+    )
+    parser.add_argument(
+        "--no_cuda",
+        action="store_true",
         default=False,
-        help="by default True, will use GPU to train; or else will use CPU;",
+        help="force use CPU even if GPU is available;",
     )
     parser.add_argument(
         "--cuda_deterministic",
@@ -194,7 +200,7 @@ def get_config():
     parser.add_argument(
         "--n_eval_rollout_threads",
         type=int,
-        default=2,
+        default=1,
         help="Number of parallel envs for evaluating rollouts",
     )
     parser.add_argument(
@@ -206,8 +212,8 @@ def get_config():
     parser.add_argument(
         "--num_env_steps",
         type=int,
-        default=10e5,
-        help="Number of environment steps to train (default: 5e5, increased for longer episodes)",
+        default=3000000,
+        help="Number of environment steps to train (default: 10e6)",
     )
     parser.add_argument(
         "--user_name",
@@ -217,7 +223,7 @@ def get_config():
     )
 
     # env parameters
-    parser.add_argument("--env_name", type=str, default="MyEnv", help="specify the name of environment")
+    parser.add_argument("--env_name", type=str, default="UAVEdgeComputingSchemeC", help="specify the name of environment")
     parser.add_argument(
         "--use_obs_instead_of_state",
         action="store_true",
@@ -231,8 +237,8 @@ def get_config():
     # network parameters
     parser.add_argument(
         "--share_policy",
-        action="store_true",
-        default=True,
+        action="store_false",
+        default=False,
         help="Whether agent share the same policy",
     )
     parser.add_argument(
@@ -262,7 +268,7 @@ def get_config():
     parser.add_argument(
         "--layer_N",
         type=int,
-        default=1,
+        default=3,
         help="Number of layers for actor/critic networks",
     )
     parser.add_argument("--use_ReLU", action="store_false", default=True, help="Whether to use ReLU")
@@ -301,8 +307,8 @@ def get_config():
     )
     parser.add_argument(
         "--use_recurrent_policy",
-        action="store_true",
-        default=True,
+        action="store_false",
+        default=False,
         help="use a recurrent policy",
     )
     parser.add_argument("--recurrent_N", type=int, default=1, help="The number of recurrent layers.")
@@ -314,11 +320,11 @@ def get_config():
     )
 
     # optimizer parameters
-    parser.add_argument("--lr", type=float, default=5e-4, help="learning rate (default: 5e-4)")
+    parser.add_argument("--lr", type=float, default=0.001, help="learning rate (default: 5e-4)")
     parser.add_argument(
         "--critic_lr",
         type=float,
-        default=5e-4,
+        default=0.001,
         help="critic learning rate (default: 5e-4)",
     )
     parser.add_argument(
@@ -330,7 +336,7 @@ def get_config():
     parser.add_argument("--weight_decay", type=float, default=0)
 
     # ppo parameters
-    parser.add_argument("--ppo_epoch", type=int, default=15, help="number of ppo epochs (default: 15)")
+    parser.add_argument("--ppo_epoch", type=int, default=10, help="number of ppo epochs (default: 15)")
     parser.add_argument(
         "--use_clipped_value_loss",
         action="store_false",
@@ -346,8 +352,8 @@ def get_config():
     parser.add_argument(
         "--num_mini_batch",
         type=int,
-        default=5,
-        help="number of batches for ppo (default: 5)",
+        default=4,
+        help="number of batches for ppo (default: 1)",
     )
     parser.add_argument(
         "--entropy_coef",
@@ -424,11 +430,426 @@ def get_config():
         default=False,
         help="use a linear schedule on the learning rate",
     )
+    parser.add_argument(
+        "--use_entropy_decay",
+        action="store_true",
+        default=False,
+        help="use entropy coefficient decay to reduce exploration over time",
+    )
+    parser.add_argument(
+        "--entropy_decay_rate",
+        type=float,
+        default=0.997,
+        help="decay rate for entropy coefficient (default: 0.99)",
+    )
+    parser.add_argument(
+        "--min_entropy_coef",
+        type=float,
+        default=0.00001,
+        help="minimum entropy coefficient value (default: 0.001)",
+    )
+    
+    # UAV MEC environment specific parameters
+    parser.add_argument(
+        "--uav_space_x",
+        type=int,
+        default=10,
+        help="UAV MEC environment x dimension (default: 10)",
+    )
+    parser.add_argument(
+        "--uav_space_y", 
+        type=int,
+        default=10,
+        help="UAV MEC environment y dimension (default: 10)",
+    )
+    parser.add_argument(
+        "--uav_space_z",
+        type=int, 
+        default=5,
+        help="UAV MEC environment z dimension (default: 5)",
+    )
+    parser.add_argument(
+        "--uav_num_uavs",
+        type=int,
+        default=3,
+        help="Number of UAVs in the environment (default: 3)",
+    )
+    parser.add_argument(
+        "--uav_num_base_stations",
+        type=int,
+        default=4, 
+        help="Number of base stations (default: 4)",
+    )
+    parser.add_argument(
+        "--uav_num_users",
+        type=int,
+        default=8,
+        help="Number of mobile users (default: 8)",
+    )
+    parser.add_argument(
+        "--uav_total_tasks",
+        type=int,
+        default=50,
+        help="Total number of tasks to complete (default: 50)",
+    )
+    parser.add_argument(
+        "--uav_task_generation_rate",
+        type=float,
+        default=0.3,
+        help="Task generation probability per user per step (default: 0.3)",
+    )
+    parser.add_argument(
+        "--uav_max_speed",
+        type=float,
+        default=2.0,
+        help="Maximum UAV movement distance per time step (default: 2.0)",
+    )
+    parser.add_argument(
+        "--uav_communication_range",
+        type=float,
+        default=5.0,
+        help="UAV communication range (default: 5.0)",
+    )
+    parser.add_argument(
+        "--uav_min_safe_distance",
+        type=float,
+        default=1.0,
+        help="Minimum safe distance between UAVs (default: 1.0)",
+    )
+    # UAVMEC奖励设置
+    parser.add_argument(
+        "--reward_task_completion",
+        type=float,
+        default=0,  # Changed from 10.0 to -10.01
+        help="Reward weight for task completion (default: 1)",
+    )
+    parser.add_argument(
+        "--reward_energy_efficiency",
+        type=float,
+        default=0,  # Already correct
+        help="Reward weight for energy efficiency (default: 1)",
+    )
+    parser.add_argument(
+        "--reward_latency_penalty",
+        type=float,
+        default=0, # Already correct
+        help="Reward weight for latency penalty (default: 1)",
+    )
+    parser.add_argument(
+        "--reward_collision_penalty",
+        type=float,
+        default=0,  # Already correct
+        help="Reward weight for collision penalty (default: 1)",
+    )
+    parser.add_argument(
+        "--reward_boundary_penalty",
+        type=float,
+        default=0,  # Already correct
+        help="Reward weight for boundary violation penalty (default: 1)",
+    )
+    parser.add_argument(
+        "--reward_cooperation_bonus",
+        type=float,
+        default=0,  # Changed from 2.0 to -2.0
+        help="Reward weight for cooperation bonus (default: 1)",
+    )
+
+    # UAV Edge Computing environment specific parameters
+    parser.add_argument(
+        "--edge_num_uavs",
+        type=int,
+        default=2,
+        help="Number of UAVs in edge computing environment (default: 2)",
+    )
+    parser.add_argument(
+        "--edge_num_terminals",
+        type=int,
+        default=6,
+        help="Number of ground terminals (default: 6)",
+    )
+    parser.add_argument(
+        "--edge_ground_area",
+        type=float,
+        default=400.0,
+        help="Ground area size in meters (default: 400.0)",
+    )
+    parser.add_argument(
+        "--edge_height_min",
+        type=float,
+        default=20.0,
+        help="Minimum UAV flight height in meters (default: 20.0)",
+    )
+    parser.add_argument(
+        "--edge_height_max",
+        type=float,
+        default=120.0,
+        help="Maximum UAV flight height in meters (default: 120.0)",
+    )
+    parser.add_argument(
+        "--edge_time_slot",
+        type=float,
+        default=1.0,
+        help="Time slot duration in seconds (default: 1.0)",
+    )
+    parser.add_argument(
+        "--edge_data_min",
+        type=float,
+        default=10.0,
+        help="Minimum task data size in KB (default: 10.0)",
+    )
+    parser.add_argument(
+        "--edge_data_max",
+        type=float,
+        default=20.0,
+        help="Maximum task data size in KB (default: 20.0)",
+    )
+    parser.add_argument(
+        "--edge_cpu_cycles_per_bit",
+        type=int,
+        default=1000,
+        help="CPU cycles required per bit (default: 1000)",
+    )
+    parser.add_argument(
+        "--edge_f_u",
+        type=float,
+        default=5e9,
+        help="UAV CPU frequency in cycles/s (default: 5e9)",
+    )
+    parser.add_argument(
+        "--edge_f_g",
+        type=float,
+        default=1e9,
+        help="Ground server CPU frequency in cycles/s (default: 1e9)",
+    )
+    parser.add_argument(
+        "--edge_max_horizontal_speed",
+        type=float,
+        default=10.0,
+        help="Maximum UAV horizontal speed in m/s (default: 10.0)",
+    )
+    parser.add_argument(
+        "--edge_max_vertical_speed",
+        type=float,
+        default=10.0,
+        help="Maximum UAV vertical speed in m/s (default: 10.0)",
+    )
+    parser.add_argument(
+        "--edge_communication_range",
+        type=float,
+        default=100.0,
+        help="UAV communication range in meters (default: 100.0)",
+    )
+
+    # UAV Edge Computing reward parameters
+    parser.add_argument(
+        "--edge_reward_task_completion",
+        type=float,
+        default=10.0,
+        help="Reward weight for task completion (default: 10.0)",
+    )
+    parser.add_argument(
+        "--edge_reward_approach_terminal",
+        type=float,
+        default=0.1,
+        help="Reward for approaching target terminal (default: 0.1)",
+    )
+    parser.add_argument(
+        "--edge_reward_energy_efficiency",
+        type=float,
+        default=1.0,
+        help="Reward weight for energy efficiency (default: 1.0)",
+    )
+    parser.add_argument(
+        "--edge_reward_energy_penalty",
+        type=float,
+        default=-0.0001,  # 从-0.01改为-0.0001，减少100倍
+        help="Penalty for energy consumption (default: -0.0001)",
+    )
+    parser.add_argument(
+        "--edge_reward_boundary_penalty",
+        type=float,
+        default=-10.0,
+        help="Penalty for boundary violation (default: -10.0)",
+    )
+    parser.add_argument(
+        "--edge_reward_all_tasks_bonus",
+        type=float,
+        default=100.0,
+        help="Bonus for completing all tasks (default: 100.0)",
+    )
+    parser.add_argument(
+        "--edge_reward_no_processing_penalty",
+        type=float,
+        default=-2.0,
+        help="Penalty when UAV processes no data in a step (default: -2.0)",
+    )
+
+    # Nash Equilibrium Game Theory reward parameters
+    parser.add_argument(
+        "--nash_w_task_progress",
+        type=float,
+        default=1.0,
+        help="Nash reward weight for task progress (default: 1.0)",
+    )
+    parser.add_argument(
+        "--nash_w_connection_quality",
+        type=float,
+        default=0.3,
+        help="Nash reward weight for connection quality (default: 0.3)",
+    )
+    parser.add_argument(
+        "--nash_w_energy_efficiency",
+        type=float,
+        default=0.2,
+        help="Nash reward weight for energy efficiency (default: 0.2)",
+    )
+    parser.add_argument(
+        "--nash_w_terminal_competition",
+        type=float,
+        default=-0.5,
+        help="Nash reward weight for terminal competition penalty (default: -0.5)",
+    )
+    parser.add_argument(
+        "--nash_w_collision_avoidance",
+        type=float,
+        default=-2.0,
+        help="Nash reward weight for collision avoidance (default: -2.0)",
+    )
+    parser.add_argument(
+        "--nash_w_coverage_coordination",
+        type=float,
+        default=0.4,
+        help="Nash reward weight for coverage coordination (default: 0.4)",
+    )
+    parser.add_argument(
+        "--nash_w_load_balance",
+        type=float,
+        default=0.3,
+        help="Nash reward weight for load balance (default: 0.3)",
+    )
+    parser.add_argument(
+        "--nash_task_completion_bonus",
+        type=float,
+        default=50.0,
+        help="Nash bonus for task completion (default: 50.0)",
+    )
+    parser.add_argument(
+        "--nash_boundary_penalty",
+        type=float,
+        default=-5.0,
+        help="Nash penalty for boundary violation (default: -5.0)",
+    )
+    parser.add_argument(
+        "--nash_collision_penalty",
+        type=float,
+        default=-5.0,
+        help="Nash penalty for collision (default: -5.0)",
+    )
+    parser.add_argument(
+        "--nash_epsilon",
+        type=float,
+        default=0.1,
+        help="Nash equilibrium tolerance (default: 0.1)",
+    )
+    parser.add_argument(
+        "--best_response_threshold",
+        type=float,
+        default=0.05,
+        help="Best response threshold for Nash adjustment (default: 0.05)",
+    )
+    parser.add_argument(
+        "--use_all_params_reward",
+        action="store_true",
+        default=False,
+        help="Use the all-params reward path for UAVEdgeComputingNash (default: False)",
+    )
+
+    # Scheme C (Cooperative Auction) reward parameters
+    parser.add_argument(
+        "--scheme_c_auction_win_reward",
+        type=float,
+        default=0.10,
+        help="Scheme C: Reward for winning auction and serving terminal (default: 0.10)",
+    )
+    parser.add_argument(
+        "--scheme_c_auction_participate_reward",
+        type=float,
+        default=0.02,
+        help="Scheme C: Reward for participating in auction (default: 0.02)",
+    )
+    parser.add_argument(
+        "--scheme_c_auction_payment_ratio",
+        type=float,
+        default=0.1,
+        help="Scheme C: Payment ratio for auction winner (default: 0.1)",
+    )
+    parser.add_argument(
+        "--scheme_c_task_completion_max",
+        type=float,
+        default=20.0,
+        help="Scheme C: Maximum task completion reward (default: 20.0)",
+    )
+    parser.add_argument(
+        "--scheme_c_task_completion_min",
+        type=float,
+        default=5.0,
+        help="Scheme C: Minimum task completion reward (default: 5.0)",
+    )
+    parser.add_argument(
+        "--scheme_c_decay_start_step",
+        type=int,
+        default=800,
+        help="Scheme C: Step to start reward decay (default: 800)",
+    )
+    parser.add_argument(
+        "--scheme_c_coop_bonus_perfect",
+        type=float,
+        default=5.0,
+        help="Scheme C: Perfect cooperation bonus (default: 5.0)",
+    )
+    parser.add_argument(
+        "--scheme_c_coop_bonus_good",
+        type=float,
+        default=3.0,
+        help="Scheme C: Good cooperation bonus (default: 3.0)",
+    )
+    parser.add_argument(
+        "--scheme_c_coop_bonus_fair",
+        type=float,
+        default=1.0,
+        help="Scheme C: Fair cooperation bonus (default: 1.0)",
+    )
+
+    # UAV Edge Computing visualization parameters
+    parser.add_argument(
+        "--enable_visualization",
+        action="store_true",
+        default=False,
+        help="Enable real-time 2D visualization of the UAV environment (default: False)",
+    )
+    parser.add_argument(
+        "--visualization_start_episode",
+        type=int,
+        default=0,
+        help="Start visualization from this episode number (0 means from beginning, default: 0)",
+    )
+    parser.add_argument(
+        "--data_record_interval",
+        type=int,
+        default=None,
+        help="Data recording interval in training mode (steps, None for auto: 50 for train, 1 for test)",
+    )
+    parser.add_argument(
+        "--data_max_episodes",
+        type=int,
+        default=None,
+        help="Maximum episodes to record in training mode (None for auto: 10 for train, 999 for test)",
+    )
     # save parameters
     parser.add_argument(
         "--save_interval",
         type=int,
-        default=1,
+        default=8,
         help="time duration between contiunous twice models saving.",
     )
 
@@ -450,7 +871,7 @@ def get_config():
     parser.add_argument(
         "--eval_interval",
         type=int,
-        default=25,
+        default=4,
         help="time duration between contiunous twice evaluation progress.",
     )
     parser.add_argument(

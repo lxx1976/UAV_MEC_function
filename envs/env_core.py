@@ -76,11 +76,11 @@ class EnvCore(object):
 
         # Energy settings
         self.rotor_params = RotorcraftParams()
-        self.battery_capacity = 80000.0  # 80 kJ (increased from 20 kJ)
+        self.battery_capacity = 324000.0  # 324 kJ
         self.energy_per_bit = 1e-6  # 1 μJ/bit (increased from 1 nJ/bit)
 
         # Reward settings
-        self.reward_per_bit = 1e-7  # 每bit数据的奖励（降低10倍）
+        self.reward_per_bit = 1e-8  # 每bit数据的奖励
         self.energy_penalty = 1e-3  # 能耗惩罚系数
         self.completion_bonus_half = 5.0  # 完成50%的奖励
         self.completion_bonus_full = 10.0  # 完成100%的奖励
@@ -154,9 +154,13 @@ class EnvCore(object):
         self.uav_battery = np.full(self.agent_num, self.battery_capacity, dtype=np.float64)
         self.uav_processing_data = {uav_id: 0.0 for uav_id in range(self.agent_num)}
         self.terminals = self._build_terminal_states()
-        # 追踪每个终端是否已经获得过50%和100%完成奖励
-        self.terminal_half_rewarded = [False] * self.num_terminals
-        self.terminal_full_rewarded = [False] * self.num_terminals
+        # 追踪每个终端的完成进度（用于奖励发放）
+        self.terminal_completion_milestones = {
+            term_id: {'half': False, 'full': False} 
+            for term_id in range(self.num_terminals)
+        }
+        # 追踪UAV是否电池耗尽（用于停止行动）
+        self.uav_depleted = np.zeros(self.agent_num, dtype=bool)
         
         return self._get_obs()
 
@@ -173,7 +177,28 @@ class EnvCore(object):
         selected_terminals = {}
 
         for uav_id in range(self.agent_num):
-            action_vec = actions[uav_id]
+            # 检查UAV是否电池耗尽，如果耗尽则跳过所有行动
+            if self.uav_depleted[uav_id]:  #电量二值化变量
+                # 电池耗尽的UAV保持原位，不执行任何动作
+                rewards.append([0.0])
+                dones.append(False)
+                infos.append({
+                    "selected_terminals": [],
+                    "service_decision": False,
+                    "num_terminals_to_serve": 0,
+                    "num_served_terminals": 0,
+                    "processed_bits": 0.0,
+                    "propulsion_energy_j": 0.0,
+                    "computation_energy_j": 0.0,
+                    "communication_energy_j": 0.0,
+                    "total_energy_j": 0.0,
+                    "battery": 0.0,
+                    "num_invalid_services": 0,
+                    "uav_depleted": True,
+                })
+                continue
+            
+            action_vec = actions[uav_id]#拿出当前单个无人机动作向量
             if action_vec.shape[0] < 3:
                 pad = np.zeros(3 - action_vec.shape[0], dtype=np.float32)
                 action_vec = np.concatenate([action_vec, pad], axis=0)
@@ -240,8 +265,8 @@ class EnvCore(object):
                     terminal_id, _ = distances[i]
                     terminal = self.terminals[terminal_id]
                     
-                    # 检查终端是否已完成
-                    if terminal.get("is_completed", False):
+                    # 检查终端是否已完成（使用剩余数据量判断，更准确）
+                    if terminal.get("remaining_data_bits", 0.0) <= 0:
                         num_invalid_services += 1
                         continue
                     
@@ -292,7 +317,7 @@ class EnvCore(object):
                     )
                     total_communication_energy += communication_energy
             
-            # 记录选择服务的终端
+            # 记录该无人机选择服务了哪些终端
             selected_terminals[uav_id] = served_terminal_ids
 
             # 累计该UAV的总处理数据量
@@ -320,14 +345,18 @@ class EnvCore(object):
 
             # 更新电池电量
             self.uav_battery[uav_id] = max(0.0, self.uav_battery[uav_id] - total_energy)
+            
+            # 检查电池是否耗尽
+            if self.uav_battery[uav_id] <= 0.0:
+                self.uav_depleted[uav_id] = True
 
             # 计算奖励
             # 正奖励：处理数据量
             reward = total_processed_bits * self.reward_per_bit
                         
             # 正奖励：提供卸载服务（只要服务了就有小奖励）
-            if len(served_terminal_ids) > 0:
-                reward += self.service_reward * len(served_terminal_ids)
+            #if len(served_terminal_ids) > 0:
+               # reward += self.service_reward * len(served_terminal_ids)
             
             # 负奖励：能耗
             reward -= total_energy * self.energy_penalty
@@ -349,6 +378,7 @@ class EnvCore(object):
                     "total_energy_j": float(total_energy),
                     "battery": float(self.uav_battery[uav_id]),
                     "num_invalid_services": int(num_invalid_services),
+                    "uav_depleted": bool(self.uav_depleted[uav_id]),
                 }
             )
 
@@ -359,8 +389,14 @@ class EnvCore(object):
             cpu_cycles_per_bit=self.cpu_cycles_per_bit,
             time_slot=self.time_slot,
         )
+        
         # 计算完成奖励：两段式奖励（50%和100%）
+        # 使用统一的milestone追踪系统
         for uav_id in range(self.agent_num):
+            # 跳过电池耗尽的UAV
+            if self.uav_depleted[uav_id]:
+                continue
+                
             served_terminal_ids = selected_terminals[uav_id]
             for term_id in served_terminal_ids:
                 served_bits = uav_terminal_progress[uav_id].get(term_id, 0.0)
@@ -371,18 +407,18 @@ class EnvCore(object):
                     completion_ratio = 1.0 - (remaining_bits / total_bits)
                     
                     # 50%完成奖励
-                    if completion_ratio >= 0.5 and not self.terminal_half_rewarded[term_id]:
+                    if completion_ratio >= 0.5 and not self.terminal_completion_milestones[term_id]['half']:
                         rewards[uav_id][0] += self.completion_bonus_half
-                        self.terminal_half_rewarded[term_id] = True
+                        self.terminal_completion_milestones[term_id]['half'] = True
                     
                     # 100%完成奖励
-                    if term_id in completed_terminal_ids and not self.terminal_full_rewarded[term_id]:
+                    if remaining_bits <= 0 and not self.terminal_completion_milestones[term_id]['full']:
                         rewards[uav_id][0] += self.completion_bonus_full
-                        self.terminal_full_rewarded[term_id] = True
+                        self.terminal_completion_milestones[term_id]['full'] = True
 
         self.current_step += 1
         all_completed, completion_ratio = check_all_tasks_completed(self.terminals)
-        out_of_battery = bool(np.any(self.uav_battery <= 0.0))
+        out_of_battery = bool(np.any(self.uav_depleted))
         timeout = self.current_step >= self.episode_limit
         episode_end = (
             timeout
@@ -391,8 +427,8 @@ class EnvCore(object):
         )
         # 添加终局惩罚      
         for uav_id in range(self.agent_num):
-            # 电池耗尽惩罚
-            if self.uav_battery[uav_id] <= 0.0:
+            # 电池耗尽惩罚（只在刚耗尽的那一步惩罚一次）
+            if self.uav_battery[uav_id] <= 0.0 and not self.uav_depleted[uav_id]:
                 rewards[uav_id][0] -= self.battery_depleted_penalty
             
             # 超时未完成所有任务的惩罚
@@ -403,7 +439,7 @@ class EnvCore(object):
             infos[uav_id]["all_tasks_completed"] = bool(all_completed)
             infos[uav_id]["task_completion_ratio"] = float(completion_ratio)
             infos[uav_id]["episode_step"] = int(self.current_step)
-            infos[uav_id]["out_of_battery"] = bool(self.uav_battery[uav_id] <= 0.0)
+            infos[uav_id]["out_of_battery"] = bool(self.uav_depleted[uav_id])
             infos[uav_id]["timeout"] = bool(timeout)
 
         obs = self._get_obs()

@@ -45,7 +45,7 @@ class EnvCore(object):
         self.current_step = 0
 
         # Space and mobility settings
-        self.ground_area = 400.0
+        self.ground_area = 4000.0
         self.height_min = 20.0
         self.height_max = 120.0
         self.initial_height = 70.0
@@ -72,7 +72,7 @@ class EnvCore(object):
         self.cpu_freq_uav = 5e9  # 5 GHz - UAV CPU (medium)
         self.cpu_freq_ground = 100e9  # 100 GHz - Ground server CPU (strong)
         self.cpu_cycles_per_bit = 1000
-        self.data_range = (200000.0, 300000.0)  # KB = 200-300 MB (increased from 100-200 KB)
+        self.data_range = (2000000.0, 3000000.0)  # KB = 200-300 MB (increased from 100-200 KB)
 
         # Energy settings
         self.rotor_params = RotorcraftParams()
@@ -161,6 +161,21 @@ class EnvCore(object):
         }
         # 追踪UAV是否电池耗尽（用于停止行动）
         self.uav_depleted = np.zeros(self.agent_num, dtype=bool)
+        
+        # 输出初始位置信息
+        #print("\n" + "=" * 50)
+        #print("=== Episode 开始 - 初始位置 ===")
+        #print("UAV位置:")
+        #for uav_id in range(self.agent_num):
+        #    pos = self.uav_positions[uav_id]
+        #    print(f"  UAV{uav_id}: x={pos[0]:.2f}, y={pos[1]:.2f}, z={pos[2]:.2f}")
+        
+        #print("\n终端位置:")
+        #for term_id, terminal in enumerate(self.terminals):
+        #    pos = terminal['position']
+        #    data_mb = terminal['total_data_bits'] / (1024 * 8 * 1000)  # bits -> MB
+        #    print(f"  终端{term_id}: x={pos[0]:.2f}, y={pos[1]:.2f}, 数据量={data_mb:.2f} MB")
+        #print("=" * 50 + "\n")
         
         return self._get_obs()
 
@@ -441,6 +456,22 @@ class EnvCore(object):
             infos[uav_id]["episode_step"] = int(self.current_step)
             infos[uav_id]["out_of_battery"] = bool(self.uav_depleted[uav_id])
             infos[uav_id]["timeout"] = bool(timeout)
+
+        # Episode结束时输出统计信息
+        if episode_end:
+            print("\n=== Episode 结束统计 ===")
+            print("终端剩余数据量:")
+            for term_id, terminal in enumerate(self.terminals):
+                remaining = terminal['remaining_data_bits']
+                total = terminal['total_data_bits']
+                completion_pct = (1 - remaining / total) * 100 if total > 0 else 0
+                print(f"  终端{term_id}: {remaining:.0f} / {total:.0f} bits ({completion_pct:.1f}%)")
+            
+            print("UAV处理数据量:")
+            for uav_id in range(self.agent_num):
+                processed = self.uav_processing_data[uav_id]
+                print(f"  UAV{uav_id}: {processed:.0f} bits ({processed/1e6:.2f} Mb)")
+            print("=" * 30 + "\n")
 
         obs = self._get_obs()
         return [obs, rewards, dones, infos]

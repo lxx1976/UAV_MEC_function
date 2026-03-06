@@ -14,10 +14,12 @@ import numpy as np
 from pathlib import Path
 import torch
 
-# Get the parent directory of the current file
-parent_dir = os.path.abspath(os.path.join(os.getcwd(), "light_mappo-main"))
+# Get the parent directory of the current file (light_mappo-main directory)
+current_file_dir = os.path.dirname(os.path.abspath(__file__))  # train/
+parent_dir = os.path.dirname(current_file_dir)  # light_mappo-main/
 
 # Append the parent directory to sys.path, otherwise the following import will fail
+sys.path.insert(0, parent_dir)
 sys.path.append(parent_dir)
 
 from config import get_config
@@ -29,78 +31,32 @@ from envs.env_wrappers import DummyVecEnv
 def make_train_env(all_args):
     def get_env_fn(rank):
         def init_env():
-            # 根据 env_name 选择环境
-            if all_args.env_name == "MyEnv":
-                # 原始示例环境
-                from envs.env_discrete import DiscreteActionEnv
-                env = DiscreteActionEnv()
-            elif all_args.env_name == "UAVMECEnv":
-                # UAV MEC 环境
-                from envs.env_uav_wrapper import UAVMECWrapper
+            # 使用离散动作空间环境
+            from envs.env_discrete import DiscreteActionEnv
+            env = DiscreteActionEnv()
 
-                # 构建环境配置
-                env_config = {
-                    'num_uavs': all_args.uav_num_uavs,
-                    'num_terminals': all_args.uav_num_terminals,
-                    'ground_area': all_args.uav_ground_area,
-                    'height_min': all_args.uav_height_min,
-                    'height_max': all_args.uav_height_max,
-                    'communication_range': all_args.uav_communication_range,
-                    'cpu_freq_uav': all_args.uav_cpu_freq_uav,
-                    'cpu_freq_ground': all_args.uav_cpu_freq_ground,
-                    'max_horizontal_speed': all_args.uav_max_horizontal_speed,
-                    'max_vertical_speed': all_args.uav_max_vertical_speed,
-                    'battery_capacity': all_args.uav_battery_capacity,
-                    'max_episode_steps': all_args.episode_length,
-                    'time_slot': all_args.uav_time_slot,
-                    'data_range': (all_args.uav_data_range_min, all_args.uav_data_range_max),
-                    'cpu_cycles_per_bit': all_args.uav_cpu_cycles_per_bit,
-                }
-                env = UAVMECWrapper(env_config)
-            else:
-                raise ValueError(f"Unknown environment: {all_args.env_name}")
+            # 如果需要使用连续动作空间，注释上面两行，取消注释下面两行
+            # from envs.env_continuous import ContinuousActionEnv
+            # env = ContinuousActionEnv()
 
             env.seed(all_args.seed + rank * 1000)
             return env
 
         return init_env
 
-    return DummyVecEnv([get_env_fn(i) for i in range(all_args.n_rollout_threads)])#并行训练一共五轮在config中有
+    return DummyVecEnv([get_env_fn(i) for i in range(all_args.n_rollout_threads)])
 
 
 def make_eval_env(all_args):
     def get_env_fn(rank):
         def init_env():
-            # 根据 env_name 选择环境（与训练环境保持一致）
-            if all_args.env_name == "MyEnv":
-                # 原始示例环境
-                from envs.env_discrete import DiscreteActionEnv
-                env = DiscreteActionEnv()
-            elif all_args.env_name == "UAVMECEnv":
-                # UAV MEC 环境
-                from envs.env_uav_wrapper import UAVMECWrapper
+            # 使用离散动作空间环境
+            from envs.env_discrete import DiscreteActionEnv
+            env = DiscreteActionEnv()
 
-                # 构建环境配置
-                env_config = {
-                    'num_uavs': all_args.uav_num_uavs,
-                    'num_terminals': all_args.uav_num_terminals,
-                    'ground_area': all_args.uav_ground_area,
-                    'height_min': all_args.uav_height_min,
-                    'height_max': all_args.uav_height_max,
-                    'communication_range': all_args.uav_communication_range,
-                    'cpu_freq_uav': all_args.uav_cpu_freq_uav,
-                    'cpu_freq_ground': all_args.uav_cpu_freq_ground,
-                    'max_horizontal_speed': all_args.uav_max_horizontal_speed,
-                    'max_vertical_speed': all_args.uav_max_vertical_speed,
-                    'battery_capacity': all_args.uav_battery_capacity,
-                    'max_episode_steps': all_args.episode_length,
-                    'time_slot': all_args.uav_time_slot,
-                    'data_range': (all_args.uav_data_range_min, all_args.uav_data_range_max),
-                    'cpu_cycles_per_bit': all_args.uav_cpu_cycles_per_bit,
-                }
-                env = UAVMECWrapper(env_config)
-            else:
-                raise ValueError(f"Unknown environment: {all_args.env_name}")
+            # 如果需要使用连续动作空间，注释上面两行，取消注释下面两行
+            # from envs.env_continuous import ContinuousActionEnv
+            # env = ContinuousActionEnv()
 
             env.seed(all_args.seed + rank * 1000)
             return env
@@ -111,9 +67,9 @@ def make_eval_env(all_args):
 
 
 def parse_args(args, parser):
-    parser.add_argument("--scenario_name", type=str, default="MyEnv", help="Which scenario to run on")
-    parser.add_argument("--num_landmarks", type=int, default=3)
-    parser.add_argument("--num_agents", type=int, default=2, help="number of players")
+    parser.add_argument("--scenario_name", type=str, default="UAV_EdgeComputing", help="Which scenario to run on")
+    parser.add_argument("--num_agents", type=int, default=2, help="number of UAVs")
+    parser.add_argument("--num_terminals", type=int, default=6, help="number of ground terminals")
 
     all_args = parser.parse_known_args(args)[0]
 
@@ -161,7 +117,7 @@ def main(args):
     if not run_dir.exists():
         os.makedirs(str(run_dir))
 
-    if not run_dir.exists():#为了避免和历史进程中有重复，所以每次都会检查从run1开始存不存在这个文件，如果有的话就创建新的，但其实就是创建了一个runX文件夹。
+    if not run_dir.exists():
         curr_run = "run1"
     else:
         exst_run_nums = [

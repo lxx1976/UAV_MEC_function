@@ -26,11 +26,6 @@ class RMAPPOPolicy:
         self.lr = args.lr
         self.critic_lr = args.critic_lr
         self.opti_eps = args.opti_eps
-        #1. opti_eps
-        # 全称通常是optimizer epsilon，有时候也叫 eps 或 epsilon。
-        # 用途：
-        # 用于防止分母为零，提高数值稳定性。
-        # 在Adam、RMSprop等自适应学习率优化器中，更新参数时会用到分母，为了避免分母为零（或太小），会加上一个很小的常数 eps。
         self.weight_decay = args.weight_decay
 
         self.obs_space = obs_space
@@ -40,10 +35,10 @@ class RMAPPOPolicy:
         self.actor = R_Actor(args, self.obs_space, self.act_space, self.device)
         self.critic = R_Critic(args, self.share_obs_space, self.device)
 
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),#优化器（优化网络参数）
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),
                                                 lr=self.lr, eps=self.opti_eps,
                                                 weight_decay=self.weight_decay)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),#优化器
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),
                                                  lr=self.critic_lr,
                                                  eps=self.opti_eps,
                                                  weight_decay=self.weight_decay)

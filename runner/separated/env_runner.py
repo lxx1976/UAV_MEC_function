@@ -17,7 +17,7 @@ class EnvRunner(Runner):
         super(EnvRunner, self).__init__(config)
 
     def run(self):
-        self.warmup()#这里会进入reset
+        self.warmup()
 
         start = time.time()
         episodes = int(self.num_env_steps) // self.episode_length // self.n_rollout_threads
@@ -36,16 +36,16 @@ class EnvRunner(Runner):
                     rnn_states,
                     rnn_states_critic,
                     actions_env,
-                ) = self.collect(step)#每个episode包括200个step
+                ) = self.collect(step)
 
                 # Obser reward and next obs
-                obs, rewards, dones, infos = self.envs.step(actions_env)#这里多层级的调用了env_core中的step，中间还涉及了异步并行设计
+                obs, rewards, dones, infos = self.envs.step(actions_env)
 
                 data = (
-                    obs,#5,2,14,size140
-                    rewards,#5,2,1
-                    dones,#(5, 2)
-                    infos,#(5,2)
+                    obs,
+                    rewards,
+                    dones,
+                    infos,
                     values,
                     actions,
                     action_log_probs,

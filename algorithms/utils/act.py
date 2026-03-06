@@ -28,7 +28,8 @@ class ACTLayer(nn.Module):
             self.action_out = Bernoulli(inputs_dim, action_dim, use_orthogonal, gain)
         elif action_space.__class__.__name__ == "MultiDiscrete":
             self.multi_discrete = True
-            action_dims = action_space.high - action_space.low + 1
+            # gym.spaces.MultiDiscrete 使用 nvec 属性存储每个维度的动作数量
+            action_dims = action_space.nvec
             self.action_outs = []
             for action_dim in action_dims:
                 self.action_outs.append(Categorical(inputs_dim, action_dim, use_orthogonal, gain))

@@ -36,9 +36,9 @@ class EnvRunner(Runner):
             for step in range(self.episode_length):
                 # Sample actions
                 (
-                    values,
-                    actions,
-                    action_log_probs,
+                    values,#价值估计
+                    actions,#动作
+                    action_log_probs,#动作在当前策略下的对数概率
                     rnn_states,
                     rnn_states_critic,
                     actions_env,
@@ -154,12 +154,9 @@ class EnvRunner(Runner):
         )  # [env_num, agent_num, 1, hidden_size]
         # rearrange action
         if self.envs.action_space[0].__class__.__name__ == "MultiDiscrete":
-            for i in range(self.envs.action_space[0].shape):
-                uc_actions_env = np.eye(self.envs.action_space[0].high[i] + 1)[actions[:, :, i]]
-                if i == 0:
-                    actions_env = uc_actions_env
-                else:
-                    actions_env = np.concatenate((actions_env, uc_actions_env), axis=2)
+            # 对于MultiDiscrete动作空间，直接使用离散动作，不需要one-hot编码
+            # For MultiDiscrete action space, use discrete actions directly without one-hot encoding
+            actions_env = actions
         elif self.envs.action_space[0].__class__.__name__ == "Discrete":
             # actions  --> actions_env : shape:[10, 1] --> [5, 2, 5]
             actions_env = np.squeeze(np.eye(self.envs.action_space[0].n)[actions], 2)
@@ -243,14 +240,8 @@ class EnvRunner(Runner):
             eval_rnn_states = np.array(np.split(_t2n(eval_rnn_states), self.n_eval_rollout_threads))
 
             if self.eval_envs.action_space[0].__class__.__name__ == "MultiDiscrete":
-                for i in range(self.eval_envs.action_space[0].shape):
-                    eval_uc_actions_env = np.eye(self.eval_envs.action_space[0].high[i] + 1)[
-                        eval_actions[:, :, i]
-                    ]
-                    if i == 0:
-                        eval_actions_env = eval_uc_actions_env
-                    else:
-                        eval_actions_env = np.concatenate((eval_actions_env, eval_uc_actions_env), axis=2)
+                # 对于MultiDiscrete动作空间，直接使用离散动作，不需要one-hot编码
+                eval_actions_env = eval_actions
             elif self.eval_envs.action_space[0].__class__.__name__ == "Discrete":
                 eval_actions_env = np.squeeze(np.eye(self.eval_envs.action_space[0].n)[eval_actions], 2)
             else:
@@ -315,12 +306,8 @@ class EnvRunner(Runner):
                 rnn_states = np.array(np.split(_t2n(rnn_states), self.n_rollout_threads))
 
                 if envs.action_space[0].__class__.__name__ == "MultiDiscrete":
-                    for i in range(envs.action_space[0].shape):
-                        uc_actions_env = np.eye(envs.action_space[0].high[i] + 1)[actions[:, :, i]]
-                        if i == 0:
-                            actions_env = uc_actions_env
-                        else:
-                            actions_env = np.concatenate((actions_env, uc_actions_env), axis=2)
+                    # 对于MultiDiscrete动作空间，直接使用离散动作，不需要one-hot编码
+                    actions_env = actions
                 elif envs.action_space[0].__class__.__name__ == "Discrete":
                     actions_env = np.squeeze(np.eye(envs.action_space[0].n)[actions], 2)
                 else:

@@ -37,7 +37,7 @@ class R_Actor(nn.Module):
         self.tpdv = dict(dtype=torch.float32, device=device)
 
         obs_shape = get_shape_from_obs_space(obs_space)
-        base = CNNBase if len(obs_shape) == 3 else MLPBase #cnn适用于三维，这份代码中的onehot格式适用一维
+        base = CNNBase if len(obs_shape) == 3 else MLPBase
         self.base = base(args, obs_shape)
 
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:

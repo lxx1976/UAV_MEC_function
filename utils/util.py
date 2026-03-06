@@ -28,7 +28,7 @@ def huber_loss(e, d):
 def mse_loss(e):
     return e**2/2
 
-def get_shape_from_obs_space(obs_space):#动作离散但是状态空间可以连续，很常见
+def get_shape_from_obs_space(obs_space):
     if obs_space.__class__.__name__ == 'Box':
         obs_shape = obs_space.shape
     elif obs_space.__class__.__name__ == 'list':
@@ -41,13 +41,14 @@ def get_shape_from_act_space(act_space):
     if act_space.__class__.__name__ == 'Discrete':
         act_shape = 1
     elif act_space.__class__.__name__ == "MultiDiscrete":
-        act_shape = act_space.shape
+        # MultiDiscrete 使用 nvec 属性，返回动作维度的数量
+        act_shape = act_space.nvec.shape[0]
     elif act_space.__class__.__name__ == "Box":
         act_shape = act_space.shape[0]
     elif act_space.__class__.__name__ == "MultiBinary":
         act_shape = act_space.shape[0]
     else:  # agar
-        act_shape = act_space[0].shape[0] + 1  
+        act_shape = act_space[0].shape[0] + 1
     return act_shape
 
 

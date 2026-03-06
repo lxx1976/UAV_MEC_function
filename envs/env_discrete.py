@@ -13,61 +13,52 @@ from envs.env_core import EnvCore
 
 class DiscreteActionEnv(object):
     """
-    对于离散动作环境的封装
-    Wrapper for discrete action environment.
+    离散动作环境包装器
+    Wrapper for discrete action environment using MultiDiscrete action space.
+
+    动作空间：MultiDiscrete([7, 2, 4])
+    - 维度0: 移动动作 (0-6)
+        0: 悬停
+        1: 向上移动
+        2: 向下移动
+        3: 向左移动
+        4: 向右移动
+        5: 向前移动
+        6: 向后移动
+    - 维度1: 服务决策 (0-1)
+        0: 不提供服务
+        1: 提供服务
+    - 维度2: 服务终端数量 (0-3)
+        0: 服务0个终端
+        1: 服务1个终端
+        2: 服务2个终端
+        3: 服务3个终端
     """
 
     def __init__(self):
-        self.env = EnvCore()
+        self.env = EnvCore(use_discrete_action=True)  # 使用离散动作空间
         self.num_agent = self.env.agent_num
 
         self.signal_obs_dim = self.env.obs_dim
-        self.signal_action_dim = self.env.action_dim
 
-        # 如果为 False，则动作是一个 N 维的 one-hot 向量。if true, action is a number 0...N, otherwise action is a one-hot N-dimensional vector
-        self.discrete_action_input = False
+        # 离散动作空间：[移动(7), 服务决策(2), 服务数量(4)]
+        self.discrete_action_input = True
+        self.movable = True
 
-        self.movable = True  
-
-        # configure spaces
+        # 配置空间
         self.action_space = []
         self.observation_space = []
         self.share_observation_space = []
 
-        share_obs_dim = 0  #所有智能体的单独观测维度相加之后的总长度。实现“全局共享观测”
-        total_action_space = []
-        for agent_idx in range(self.num_agent):  #在enc_core.py中定义,开始为每一个智能体分配动作空间等等
-            # physical action space
-            u_action_space = spaces.Discrete(self.signal_action_dim)  # 5个离散的动作，动作维度在env_core.py中定义
+        share_obs_dim = 0
 
-            # if self.movable:
-            total_action_space.append(u_action_space)
-            '''
-            现在的写法：
-            只把每个 agent 的 action_space 分开存，不关心“联合空间”。
+        for agent in range(self.num_agent):
+            # 离散动作空间：MultiDiscrete
+            # [移动动作(0-6), 服务决策(0-1), 服务终端数(0-3)]
+            discrete_action_space = spaces.MultiDiscrete([7, 2, 4])
+            self.action_space.append(discrete_action_space)
 
-            注释掉的写法：
-            其实是支持把所有 agent 的动作空间合成为一个总的动作空间，可以简化多智能体训练时的动作分布建模，适用于某些联合建模的算法（比如单网络输出所有 agent 行为）。
-            '''
-            # total action space
-            # if len(total_action_space) > 1:
-            #     # all action spaces are discrete, so simplify to MultiDiscrete action space
-            #     if all(
-            #         [
-            #             isinstance(act_space, spaces.Discrete)
-            #             for act_space in total_action_space
-            #         ]
-            #     ):
-            #         act_space = MultiDiscrete(
-            #             [[0, act_space.n - 1] for act_space in total_action_space]
-            #         )
-            #     else:
-            #         act_space = spaces.Tuple(total_action_space)
-            # self.action_space.append(act_space)
-            # else:
-            self.action_space.append(total_action_space[agent_idx])
-
-            # observation space
+            # 观测空间
             share_obs_dim += self.signal_obs_dim
             self.observation_space.append(
                 spaces.Box(
@@ -76,39 +67,57 @@ class DiscreteActionEnv(object):
                     shape=(self.signal_obs_dim,),
                     dtype=np.float32,
                 )
-            )  # [-inf,inf]
+            )
 
-        self.share_observation_space = [        #共享观测空间
-            spaces.Box(low=-np.inf, high=+np.inf, shape=(share_obs_dim,), dtype=np.float32)
+        # 共享观测空间（用于中心化Critic）
+        self.share_observation_space = [
+            spaces.Box(
+                low=-np.inf, high=+np.inf, shape=(share_obs_dim,), dtype=np.float32
+            )
             for _ in range(self.num_agent)
         ]
 
     def step(self, actions):
         """
-        输入actions维度假设：
-        # actions shape = (5, 2, 5)
-        # 5个线程的环境，里面有2个智能体，每个智能体的动作是一个one_hot的5维编码
-        Input actions dimension assumption:
-        # actions shape = (5, 2, 5)
-        # 5 threads of the environment, with 2 intelligent agents inside, and each intelligent agent's action is a 5-dimensional one_hot encoding
-        """
+        执行动作
 
+        参数:
+            actions: 离散动作数组
+                shape = (n_threads, n_agents, 3) for MultiDiscrete
+                或 shape = (n_agents, 3) for single thread
+                每个动作是 [移动(0-6), 服务(0-1), 数量(0-3)]
+
+        返回:
+            obs: 观测
+            rewards: 奖励
+            dones: 完成标志
+            infos: 信息字典
+        """
+        # 确保actions是正确的格式
+        actions = np.asarray(actions, dtype=np.int32)
+
+        # 调用环境的step函数
         results = self.env.step(actions)
         obs, rews, dones, infos = results
+
         return np.stack(obs), np.stack(rews), np.stack(dones), infos
 
     def reset(self):
-        obs = self.env.reset()#这里调用了envcore的reset功能
+        """重置环境"""
+        obs = self.env.reset()
         return np.stack(obs)
 
     def close(self):
+        """关闭环境"""
         pass
 
     def render(self, mode="rgb_array"):
+        """渲染环境"""
         pass
 
     def seed(self, seed):
-        pass
+        """设置随机种子"""
+        np.random.seed(seed)
 
 
 class MultiDiscrete:

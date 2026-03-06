@@ -1801,11 +1801,11 @@ def decode_action_vector_distance_based(
         raise ValueError("action_vector must contain at least 3 elements.")
     
     # 解码移动动作
-    movement_action = continuous_to_discrete_index(action_vector[0], movement_bins)
-    horizontal_action, vertical_action = parse_movement_action(movement_action)
+    movement_action = continuous_to_discrete_index(action_vector[0], movement_bins)#解码动作
+    horizontal_action, vertical_action = parse_movement_action(movement_action)#动作解码到横向与纵向
     
     # 解码服务决策（连续值 > 0 → 服务）
-    service_decision = bool(action_vector[1] > 0.0)
+    service_decision = bool(action_vector[1] > 0.0)#是否服务动作
     
     # 解码服务终端数量（0 到 max_serve_terminals）
     num_terminals_to_serve = continuous_to_discrete_index(
@@ -2440,6 +2440,85 @@ def parse_movement_action(movement_action: int) -> Tuple[int, int]:
         return 4, 2  # 不动 + 悬停
     else:
         return 4, 2  # 默认：不动 + 悬停
+
+
+def decode_discrete_action(
+    action_vector: np.ndarray
+) -> Tuple[int, int, int, bool, int]:
+    """
+    [8.1.4] 解码离散动作向量
+
+    功能：将MultiDiscrete动作向量解码为具体的动作参数
+
+    参数:
+        action_vector: [3,] 离散动作向量
+            - action_vector[0]: 移动动作 (0-6)
+                0: 悬停
+                1: 向上移动
+                2: 向下移动
+                3: 向左移动
+                4: 向右移动
+                5: 向前移动
+                6: 向后移动
+            - action_vector[1]: 服务决策 (0-1)
+                0: 不提供服务
+                1: 提供服务
+            - action_vector[2]: 服务终端数量 (0-3)
+
+    返回:
+        movement_action: 移动动作索引 (0-6)
+        horizontal_action: 水平动作 (0-4)
+        vertical_action: 垂直动作 (0-2)
+        service_decision: 是否提供服务 (True/False)
+        num_terminals_to_serve: 服务终端数量 (0-3)
+
+    示例:
+        >>> action = np.array([3, 1, 2])  # 向左移动, 提供服务, 服务2个终端
+        >>> movement, h, v, service, num = decode_discrete_action(action)
+        >>> movement  # 3
+        >>> h, v  # (2, 2) - 向左 + 悬停
+        >>> service  # True
+        >>> num  # 2
+    """
+    if len(action_vector) < 3:
+        raise ValueError("action_vector must contain at least 3 elements.")
+
+    # 解码移动动作（直接使用离散值）
+    movement_action = int(action_vector[0])
+
+    # 将移动动作映射到水平和垂直动作
+    # 新的映射：
+    # 0: 悬停 (不动 + 悬停)
+    # 1: 向上移动 (向上 + 悬停)
+    # 2: 向下移动 (向下 + 悬停)
+    # 3: 向左移动 (向左 + 悬停)
+    # 4: 向右移动 (向右 + 悬停)
+    # 5: 上升 (不动 + 上升)
+    # 6: 下降 (不动 + 下降)
+    if movement_action == 0:
+        horizontal_action, vertical_action = 4, 2  # 不动 + 悬停
+    elif movement_action == 1:
+        horizontal_action, vertical_action = 0, 2  # 向上 + 悬停
+    elif movement_action == 2:
+        horizontal_action, vertical_action = 1, 2  # 向下 + 悬停
+    elif movement_action == 3:
+        horizontal_action, vertical_action = 2, 2  # 向左 + 悬停
+    elif movement_action == 4:
+        horizontal_action, vertical_action = 3, 2  # 向右 + 悬停
+    elif movement_action == 5:
+        horizontal_action, vertical_action = 4, 1  # 不动 + 上升
+    elif movement_action == 6:
+        horizontal_action, vertical_action = 4, 0  # 不动 + 下降
+    else:
+        horizontal_action, vertical_action = 4, 2  # 默认：不动 + 悬停
+
+    # 解码服务决策（0=不服务, 1=服务）
+    service_decision = bool(int(action_vector[1]))
+
+    # 解码服务终端数量（0-3）
+    num_terminals_to_serve = int(action_vector[2])
+
+    return movement_action, horizontal_action, vertical_action, service_decision, num_terminals_to_serve
 
 
 def validate_action(action: int, action_dim: int) -> bool:

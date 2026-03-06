@@ -24,7 +24,6 @@ class DummyVecEnv():
         Step the environments synchronously.
         This is available for backwards compatibility.
         """
-        #实际上，下面这行首先发出“异步”步进请求，即把所有动作分发给各个子环境，但不立即收结果（允许并发/多线程）。
         self.step_async(actions)
         return self.step_wait()
 
@@ -33,10 +32,9 @@ class DummyVecEnv():
 
     def step_wait(self):
         results = [env.step(a) for (a, env) in zip(self.actions, self.envs)]
-        #算出来的格式都是num_env，num，xx（5，2，14）（5，2，1）（5，2）（5，2）（info可以是空的，存储额外信息）
         obs, rews, dones, infos = map(np.array, zip(*results))
 
-        for (i, done) in enumerate(dones):#所有智能体都得done这个回合才算done
+        for (i, done) in enumerate(dones):
             if 'bool' in done.__class__.__name__:
                 if done:
                     obs[i] = self.envs[i].reset()

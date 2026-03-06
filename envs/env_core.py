@@ -15,6 +15,7 @@ from .function import (
     clip_position_to_boundary,           # 将位置裁剪到合法范围内（边界约束）
     construct_full_observation,          # 构建完整观测向量（自身+终端+其他UAV）
     decode_action_vector_distance_based, # 将连续动作向量解码为离散动作（移动+基于距离的服务）
+    decode_discrete_action,              # 将离散动作向量解码为具体动作参数（新增）
     generate_terminal_positions,         # 生成地面终端位置（随机或基准+偏移）
     generate_uav_initial_positions,      # 生成UAV初始位置（中心/随机/网格）
     get_fixed_terminal_positions,        # 获取固定的终端基准位置
@@ -33,11 +34,12 @@ class EnvCore(object):
     - action[2]: mapped to number of terminals to serve (4 bins: 0-3)
     """
 
-    def __init__(self):
+    def __init__(self, use_discrete_action=False):
         # Multi-agent settings
         self.agent_num = 2
         self.num_terminals = 6
         self.action_dim = 3
+        self.use_discrete_action = use_discrete_action  # 是否使用离散动作空间
 
         # Episode settings
         self.episode_limit = 1000
@@ -45,7 +47,7 @@ class EnvCore(object):
         self.current_step = 0
 
         # Space and mobility settings
-        self.ground_area = 4000.0
+        self.ground_area = 400.0
         self.height_min = 20.0
         self.height_max = 120.0
         self.initial_height = 70.0
@@ -68,11 +70,11 @@ class EnvCore(object):
         self.eta_los = 1.0   # LoS additional loss
         self.eta_nlos = 20.0 # NLoS additional loss
         
-        self.cpu_freq_terminal = 2e9  # 2 GHz - Terminal local CPU (weak)
+        self.cpu_freq_terminal = 1e9  # 2 GHz - Terminal local CPU (weak)
         self.cpu_freq_uav = 5e9  # 5 GHz - UAV CPU (medium)
-        self.cpu_freq_ground = 100e9  # 100 GHz - Ground server CPU (strong)
+        self.cpu_freq_ground = 1e9  # 100 GHz - Ground server CPU (strong)
         self.cpu_cycles_per_bit = 1000
-        self.data_range = (2000000.0, 3000000.0)  # KB = 200-300 MB (increased from 100-200 KB)
+        self.data_range = (200000.0, 300000.0)  # KB = 200-300 MB (increased from 100-200 KB)从bit上来看是 1-2e9 bits
 
         # Energy settings
         self.rotor_params = RotorcraftParams()
@@ -80,10 +82,10 @@ class EnvCore(object):
         self.energy_per_bit = 1e-6  # 1 μJ/bit (increased from 1 nJ/bit)
 
         # Reward settings
-        self.reward_per_bit = 1e-8  # 每bit数据的奖励
+        self.reward_per_bit = 1e-7  # 每bit数据的奖励 ( 1e-8 -> 1e-6)
         self.energy_penalty = 1e-3  # 能耗惩罚系数
-        self.completion_bonus_half = 5.0  # 完成50%的奖励
-        self.completion_bonus_full = 10.0  # 完成100%的奖励
+        self.completion_bonus_half = 15.0  # 完成50%的奖励
+        self.completion_bonus_full = 30.0  # 完成100%的奖励
         self.service_reward = 0.1  # 提供卸载服务的小奖励
         self.invalid_service_penalty = 0.5  # 服务已完成终端的惩罚
         self.battery_depleted_penalty = 50.0  # 电池耗尽的惩罚
@@ -180,7 +182,14 @@ class EnvCore(object):
         return self._get_obs()
 
     def step(self, actions):
-        actions = np.asarray(actions, dtype=np.float32)
+        # 根据动作空间类型处理actions
+        if self.use_discrete_action:
+            # 离散动作：直接使用整数
+            actions = np.asarray(actions, dtype=np.int32)
+        else:
+            # 连续动作：转换为float32
+            actions = np.asarray(actions, dtype=np.float32)
+
         if actions.ndim == 1:
             actions = actions.reshape(self.agent_num, -1)
 
@@ -212,18 +221,30 @@ class EnvCore(object):
                     "uav_depleted": True,
                 })
                 continue
-            
-            action_vec = actions[uav_id]#拿出当前单个无人机动作向量
-            if action_vec.shape[0] < 3:
-                pad = np.zeros(3 - action_vec.shape[0], dtype=np.float32)
-                action_vec = np.concatenate([action_vec, pad], axis=0)
 
-            # 解码动作：移动 + 服务决策 + 服务终端数量
-            movement_action, horizontal_action, vertical_action, service_decision, num_terminals_to_serve = decode_action_vector_distance_based(
-                action_vector=action_vec,
-                num_terminals=self.num_terminals,
-                movement_bins=7,
-            )
+            action_vec = actions[uav_id]  # 拿出当前单个无人机动作向量
+
+            # 根据动作空间类型解码动作
+            if self.use_discrete_action:
+                # 离散动作解码
+                if action_vec.shape[0] < 3:
+                    pad = np.zeros(3 - action_vec.shape[0], dtype=np.int32)
+                    action_vec = np.concatenate([action_vec, pad], axis=0)
+
+                movement_action, horizontal_action, vertical_action, service_decision, num_terminals_to_serve = decode_discrete_action(
+                    action_vector=action_vec
+                )
+            else:
+                # 连续动作解码（原有逻辑）
+                if action_vec.shape[0] < 3:
+                    pad = np.zeros(3 - action_vec.shape[0], dtype=np.float32)
+                    action_vec = np.concatenate([action_vec, pad], axis=0)
+
+                movement_action, horizontal_action, vertical_action, service_decision, num_terminals_to_serve = decode_action_vector_distance_based(
+                    action_vector=action_vec,
+                    num_terminals=self.num_terminals,
+                    movement_bins=7,
+                )
 
 
             old_pos = self.uav_positions[uav_id].copy()
@@ -285,8 +306,8 @@ class EnvCore(object):
                         num_invalid_services += 1
                         continue
                     
-                    # 计算上行速率
-                    uplink_rate = calculate_uplink_rate(
+                    # 计算上行速率#返回单位为bits
+                    uplink_rate = calculate_uplink_rate(  
                         uav_pos=moved_pos,
                         terminal_pos=terminal["position"],
                         transmit_power=self.transmit_power,

@@ -8,6 +8,8 @@
 import time
 import numpy as np
 import torch
+import csv
+import os
 from runner.shared.base_runner import Runner
 
 # import imageio
@@ -23,15 +25,25 @@ class EnvRunner(Runner):
     def __init__(self, config):
         super(EnvRunner, self).__init__(config)
 
+        # 初始化episode数据统计
+        self.episode_data_stats = []
+        self.csv_path = os.path.join(str(self.run_dir), 'episode_data_processed.csv')
+
     def run(self):
         self.warmup()
 
         start = time.time()
         episodes = int(self.num_env_steps) // self.episode_length // self.n_rollout_threads
 
+        # 初始化episode数据收集
+        episode_processed_data = {f'uav_{i}': 0.0 for i in range(self.num_agents)}
+
         for episode in range(episodes):
             if self.use_linear_lr_decay:
                 self.trainer.policy.lr_decay(episode, episodes)
+
+            # 重置episode数据统计
+            episode_processed_data = {f'uav_{i}': 0.0 for i in range(self.num_agents)}
 
             for step in range(self.episode_length):
                 # Sample actions
@@ -47,6 +59,12 @@ class EnvRunner(Runner):
                 # Obser reward and next obs
                 obs, rewards, dones, infos = self.envs.step(actions_env)
 
+                # 收集每个step的处理数据量
+                for env_id in range(self.n_rollout_threads):
+                    for agent_id in range(self.num_agents):
+                        if 'processed_bits' in infos[env_id][agent_id]:
+                            episode_processed_data[f'uav_{agent_id}'] += infos[env_id][agent_id]['processed_bits']
+
                 data = (
                     obs,
                     rewards,
@@ -61,6 +79,21 @@ class EnvRunner(Runner):
 
                 # insert data into buffer
                 self.insert(data)
+
+            # 保存episode统计数据
+            episode_stat = {
+                'episode': episode,
+                'total_steps': (episode + 1) * self.episode_length * self.n_rollout_threads,
+            }
+            # 添加每个UAV的处理数据量（转换为MB）
+            for uav_id in range(self.num_agents):
+                episode_stat[f'uav_{uav_id}_processed_mb'] = episode_processed_data[f'uav_{uav_id}'] / (8 * 1024 * 1024)
+
+            # 计算总处理量
+            total_processed = sum(episode_processed_data.values())
+            episode_stat['total_processed_mb'] = total_processed / (8 * 1024 * 1024)
+
+            self.episode_data_stats.append(episode_stat)
 
             # compute return and update network
             self.compute()
@@ -107,6 +140,10 @@ class EnvRunner(Runner):
             # eval
             if episode % self.eval_interval == 0 and self.use_eval:
                 self.eval(total_num_steps)
+
+        # 训练结束后保存CSV和生成可视化
+        self.save_episode_data_to_csv()
+        self.visualize_episode_data()
 
     def warmup(self):
         # reset env
@@ -338,3 +375,79 @@ class EnvRunner(Runner):
 
         # if self.all_args.save_gifs:
         #     imageio.mimsave(str(self.gif_dir) + '/render.gif', all_frames, duration=self.all_args.ifi)
+
+    def save_episode_data_to_csv(self):
+        """保存episode数据处理统计到CSV文件"""
+        if len(self.episode_data_stats) == 0:
+            print("No episode data to save.")
+            return
+
+        print(f"\n保存episode数据统计到: {self.csv_path}")
+
+        # 获取所有列名
+        fieldnames = list(self.episode_data_stats[0].keys())
+
+        # 写入CSV
+        with open(self.csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(self.episode_data_stats)
+
+        print(f"成功保存 {len(self.episode_data_stats)} 个episode的数据统计")
+
+    def visualize_episode_data(self):
+        """生成数据处理量的可视化图表"""
+        if len(self.episode_data_stats) == 0:
+            print("No episode data to visualize.")
+            return
+
+        try:
+            import matplotlib
+            matplotlib.use('Agg')  # 使用非交互式后端
+            import matplotlib.pyplot as plt
+        except ImportError:
+            print("matplotlib未安装，跳过可视化。请运行: pip install matplotlib")
+            return
+
+        print("\n生成数据处理量可视化图表...")
+
+        # 提取数据
+        episodes = [stat['episode'] for stat in self.episode_data_stats]
+        total_processed = [stat['total_processed_mb'] for stat in self.episode_data_stats]
+
+        # 提取每个UAV的数据
+        uav_data = {}
+        for uav_id in range(self.num_agents):
+            uav_data[f'UAV{uav_id}'] = [stat[f'uav_{uav_id}_processed_mb'] for stat in self.episode_data_stats]
+
+        # 创建图表
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+
+        # 图1: 总数据处理量
+        ax1.plot(episodes, total_processed, 'b-', linewidth=2, label='Total Processed')
+        ax1.set_xlabel('Episode', fontsize=12)
+        ax1.set_ylabel('Data Processed (MB)', fontsize=12)
+        ax1.set_title('Total Data Processed per Episode', fontsize=14, fontweight='bold')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend()
+
+        # 图2: 每个UAV的数据处理量
+        colors = ['r', 'g', 'b', 'orange', 'purple', 'brown']
+        for idx, (uav_name, data) in enumerate(uav_data.items()):
+            color = colors[idx % len(colors)]
+            ax2.plot(episodes, data, color=color, linewidth=2, label=uav_name, marker='o', markersize=3)
+
+        ax2.set_xlabel('Episode', fontsize=12)
+        ax2.set_ylabel('Data Processed (MB)', fontsize=12)
+        ax2.set_title('Data Processed per UAV per Episode', fontsize=14, fontweight='bold')
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
+
+        plt.tight_layout()
+
+        # 保存图表
+        plot_path = os.path.join(str(self.run_dir), 'episode_data_processed.png')
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        plt.close()
+
+        print(f"可视化图表已保存到: {plot_path}")
